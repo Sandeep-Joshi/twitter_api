@@ -1,0 +1,123 @@
+---
+title: 'Network Models'
+author: "Sandeep Joshi"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+rm(list = ls(all.names = TRUE))
+gc()
+```
+
+## Load the libraries + functions
+
+```{r}
+library(files)
+library(googleLanguageR)
+library(tidytext)
+library(stringr)
+library(tidyr)
+library(tm)
+library(syuzhet)
+library(topicmodels)
+library(tidyverse)
+library(slam)
+library(textstem)
+```
+
+
+```{r}
+replies_index = list.files('replies')
+
+# load tweet and its replies.
+tweets_df <-  read.csv('Practice Tweets.csv')
+
+# Clean tweets
+clean_replies <- function(reply) {
+  clean_tweet <- str_remove_all(reply, "@.*?(\\s+?|$)|^RT |http.*?(\\s+?|$)") # To remove @twitter handles and Retweet tag.
+  clean_tweet <- tolower(clean_tweet)
+  clean_tweet <- str_squish(str_trim(clean_tweet))
+  # Not removing punctuations as some libraries use emoticons to analyze tweets
+  clean_tweet <- removeWords(clean_tweet, stopwords('en')) # delete stopwords from text
+  clean_tweet <- stem_strings(clean_tweet) # stemming. Might need to remove it as it can confuse certain sentiment analyses
+  return(clean_tweet)
+}
+
+
+# Check if we have replies data for the tweet using conversation id
+check_replies <- function(tweet) {
+  reply_file = paste0(tweet[,3], ".csv")
+  if (reply_file %in% replies_index){
+    # reply found, work with tweet
+    cat("Tweet: ", tweet[,8], " ")
+    cat("Likes: ", tweet[,7], "and Retweets: ", tweet[,6], ". ")
+    reply_df <- read.csv(paste0('replies/', reply_file))
+    cat("Number of replies found: ", nrow(reply_df), ". ")
+    reply_df$Text <- lapply(reply_df$Text, clean_replies)
+    return(reply_df)
+  } 
+  else {
+    return(NULL)
+  }
+}
+
+# Running sentiment analysis on tweets
+sentiment_score <- function(tweet) {
+  # Syuzhet. Other methods are “bing”, “afinn”, “nrc”, and “stanford”
+  browser()
+  return(get_nrc_sentiment(tweet))
+}
+
+# Topic modelling on tweets to 2 topics
+topic_model <- function(tweet_col) {
+  reply_corpus <- Corpus(VectorSource(tweet_col))
+  # Stemming, stop words have been taken care of earlier
+  import_mat <- DocumentTermMatrix(reply_corpus, control = list(minWordLength = 3,
+                                                                removeNumbers = TRUE,
+                                                                removePunctuation =TRUE))
+  import_weight = tapply(import_mat$v/row_sums(import_mat)[import_mat$i], 
+                       import_mat$j, 
+                       mean) *
+    log2(nDocs(import_mat)/col_sums(import_mat > 0))
+  
+  #ignore very frequent and 0 terms
+  #import_mat = import_mat[ , import_weight >= 0.90]
+  import_mat = import_mat[ row_sums(import_mat) > 0, ]
+  
+  # 2 topics and random seed of 7
+  LDA_gibbs = LDA(import_mat, k = 2, method = "Gibbs", 
+                control = list(seed = 7, burnin = 1000, 
+                               thin = 100, iter = 1000))
+  # See Topic modellings values to verify all indicators are within control and expected range
+  cat("LDA Gibb's Alpha: ", LDA_gibbs@alpha, 
+      "entropy: ", mean(apply(posterior(LDA_gibbs)$topics, 1, function(z) - sum(z * log(z)))))
+  return(LDA_gibbs)
+}
+
+```
+
+```{r}
+for(i in 1:nrow(tweets_df)) {
+    replies = check_replies(tweets_df[i,])
+    
+    if (!is.null(replies)) {
+      # Do sentiment analysis for each reply
+      # reply_df <- cbind(replies, tapply(replies$Text, sentiment_score))
+      temp <- lapply(replies$Text, sentiment_score)
+      cat("temp done")
+      
+      #reply_df <- cbind(replies, temp)
+      #cat("cbing done")
+      # Do Topic modelling for all replies.
+      #tweets_df[i,]$Topic <- topic_model(reply_df$Clean_text)      
+      #cat("topic done")
+      break
+    }
+}
+```
+
